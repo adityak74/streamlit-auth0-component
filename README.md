@@ -25,6 +25,7 @@ pip install streamlit-auth0-component-extended
 - ✅ **Custom Scope Support** - Request specific scopes (e.g., `"openid profile email read:reports"`)
 - ✅ **Prompt Parameter** - Control authentication prompt behavior (`"login"`, `"consent"`, `"none"`)
 - ✅ **Custom Domain Support** - Works with Auth0 custom domains (not just `.auth0.com`)
+- ✅ **Consent Popup Fallback** - Automatically prompts for consent when required (e.g. on `localhost` or custom-audience APIs)
 - ✅ **Enhanced Error Handling** - Better error messages and debugging
 - ✅ **Backward Compatible** - All new parameters are optional
 
@@ -87,7 +88,18 @@ This fork extends the original [streamlit-auth0-component](https://github.com/co
 - Custom domain support (not limited to `.auth0.com` domains)
 - Improved error handling and validation
 - Fixed logout functionality for iframe contexts
-- Enhanced callback URL handling 
+- Enhanced callback URL handling
+
+## Changelog
+
+### 0.3.2
+
+- **Fixed consent-required login failure.** When `getTokenSilently` returns
+  `consent_required` or `login_required` (common on `localhost` and when using
+  custom-audience APIs, since Auth0 cannot skip user consent there), the
+  component now falls back to a consent popup (`getTokenWithPopup`) so login
+  completes instead of erroring out with `Error: Consent required`. On first
+  login this surfaces two popups: one to authenticate, and one to grant consent.
 
 
 
