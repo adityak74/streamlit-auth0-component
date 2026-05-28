@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="streamlit-auth0-component-extended",
-    version="0.3.1",
+    version="0.3.2",
     author="Aditya Karnam",
     author_email="akarnam37@gmail.com",
     description="Enhanced Streamlit Auth0 login component with persistent authentication, custom audience, scope, and authorization parameters",
