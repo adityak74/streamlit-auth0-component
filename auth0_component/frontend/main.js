@@ -122,7 +122,19 @@ const login = async () => {
     await auth0.loginWithPopup()
     
     const user = await auth0.getUser()
-    const token = await auth0.getTokenSilently(buildTokenOptions())
+
+    let token
+    try {
+      token = await auth0.getTokenSilently(buildTokenOptions())
+    } catch (tokenErr) {
+      // Auth0 cannot skip consent for localhost / custom-audience APIs, so it
+      // returns consent_required. Fall back to a consent popup to collect it.
+      if (tokenErr.error === 'consent_required' || tokenErr.error === 'login_required') {
+        token = await auth0.getTokenWithPopup(buildTokenOptions())
+      } else {
+        throw tokenErr
+      }
+    }
     
     let userCopy = JSON.parse(JSON.stringify(user))
     userCopy.token = token
