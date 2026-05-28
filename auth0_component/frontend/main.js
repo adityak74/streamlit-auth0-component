@@ -9,7 +9,7 @@ const button = div.appendChild(document.createElement("button"))
 button.className = "log"
 button.textContent = "Login"
 
-// set flex collumn so the error message appears under the button
+// set flex column so the error message appears under the button
 div.style = "display: flex; flex-direction: column; color: rgb(104, 85, 224); font-weight: 600; margin: 0; padding: 10px"
 const errorNode = div.appendChild(document.createTextNode(""))
 
@@ -22,138 +22,179 @@ let scope
 let prompt
 let authorization_params = {}
 
-const logout = async () => {
-  try {
-    // Clear the component value first to update Streamlit
-    Streamlit.setComponentValue(null)
-    
-    // Determine the returnTo URL - should be the parent window's origin (Streamlit app)
-    let returnTo = window.location.origin
-    
-    if (window.parent !== window) {
-      // We're in an iframe - redirect parent window to Auth0 logout endpoint
-      try {
-        if (window.parent.location) {
-          returnTo = window.parent.location.origin
-          // Manually redirect parent window to Auth0 logout endpoint
-          // This properly logs out from Auth0 and redirects back to the Streamlit app
-          const logoutUrl = `https://${domain}/v2/logout?client_id=${client_id}&returnTo=${encodeURIComponent(returnTo)}`
-          window.parent.location.href = logoutUrl
-          return
-        }
-      } catch (e) {
-        // Cross-origin iframe - can't access parent.location
-        // Fall back to clearing local state and using auth0.logout() on iframe
-        console.warn('Cannot access parent window, clearing local state only')
-        await auth0.logout({ localOnly: true })
-        Streamlit.setComponentValue(null)
-        button.textContent = "Login"
-        button.removeEventListener('click', logout)
-        button.addEventListener('click', login)
-        return
-      }
-    }
-    
-    // Not in iframe - use regular logout which will redirect to Auth0 and back
-    await auth0.logout({ returnTo: returnTo })
-    
-    // Update UI immediately (though redirect will happen)
-    button.textContent = "Login"
-    button.removeEventListener('click', logout)
-    button.addEventListener('click', login)
-  } catch (error) {
-    console.error('Logout error:', error)
-    // Even if logout fails, clear local state
-    try {
-      await auth0.logout({ localOnly: true })
-    } catch (e) {
-      console.error('Local logout also failed:', e)
-    }
-    Streamlit.setComponentValue(null)
-    button.textContent = "Login"
-    button.removeEventListener('click', logout)
-    button.addEventListener('click', login)
-  }
-}
-
-const login = async () => {
-  button.textContent = 'working...'
-  console.log('Callback urls set to: ', getOriginUrl())
-  
-  // Build authorizationParams object dynamically
+// Build Auth0 authorization params
+function buildAuthorizationParams() {
   const authorizationParams = {
     redirect_uri: getOriginUrl(),
   }
   
-  // Use custom audience if provided, otherwise default to https://${domain}/api/v2/
   if (audience !== undefined && audience !== null) {
     authorizationParams.audience = audience
   } else {
     authorizationParams.audience = `https://${domain}/api/v2/`
   }
   
-  // Add scope if provided
   if (scope !== undefined && scope !== null) {
     authorizationParams.scope = scope
   }
   
-  // Add prompt if provided
   if (prompt !== undefined && prompt !== null) {
     authorizationParams.prompt = prompt
   }
   
-  // Add any other authorization parameters
   Object.assign(authorizationParams, authorization_params)
+  return authorizationParams
+}
+
+// Build token options
+function buildTokenOptions() {
+  const tokenOptions = {}
+  tokenOptions.audience = audience !== undefined && audience !== null 
+    ? audience 
+    : `https://${domain}/api/v2/`
+  
+  if (scope !== undefined && scope !== null) {
+    tokenOptions.scope = scope
+  }
+  return tokenOptions
+}
+
+// Initialize Auth0 client (uses localStorage for caching)
+async function initAuth0Client() {
+  if (auth0) return auth0
   
   auth0 = await createAuth0Client({
-      domain: domain,
-      client_id: client_id,
-      authorizationParams: authorizationParams,
-      useRefreshTokens: true,
-      cacheLocation: "localstorage",
-    });
-    try{
-      await auth0.loginWithPopup();
-      errorNode.textContent = ''
-    }
-    catch(err){
-      console.log(err)
-      errorNode.textContent = `Popup blocked, please try again or enable popups` + String.fromCharCode(160)
-      return
-    }
-    const user = await auth0.getUser();
-    console.log(user)
-    
-    // Build token options with custom audience and scope if provided
-    const tokenOptions = {}
-    const defaultAudience = audience !== undefined && audience !== null ? audience : `https://${domain}/api/v2/`
-    tokenOptions.audience = defaultAudience
-    
-    if (scope !== undefined && scope !== null) {
-      tokenOptions.scope = scope
-    }
-    
-    let token = false
-    
-    try{
-    token = await auth0.getTokenSilently(tokenOptions);
-      }
-      catch(error){
-        if (error.error === 'consent_required' || error.error === 'login_required'){
-          console.log('asking user for permission to their profile')
-           token = await auth0.getTokenWithPopup(tokenOptions);
-            console.log(token)
-        }
-        else{console.log(error)}
-      }
+    domain: domain,
+    client_id: client_id,
+    authorizationParams: buildAuthorizationParams(),
+    useRefreshTokens: true,
+    cacheLocation: "localstorage",  // This stores tokens in localStorage
+  })
+  return auth0
+}
 
-    let userCopy = JSON.parse(JSON.stringify(user));
+const logout = async () => {
+  try {
+    // 1. Clear Auth0 localStorage cache first (local logout)
+    if (auth0) {
+      await auth0.logout({ localOnly: true })
+    }
+    
+    // 2. Reset auth0 client
+    auth0 = null
+    
+    // 3. Notify Streamlit to clear session state
+    Streamlit.setComponentValue(null)
+    
+    console.log('Logout complete - localStorage cleared, reloading...')
+    
+    // 4. Reload the page to get fresh state
+    // Small delay to ensure Streamlit processes the null value
+    setTimeout(() => {
+      if (window.parent !== window) {
+        window.parent.location.reload()
+      } else {
+        window.location.reload()
+      }
+    }, 100)
+  } catch (error) {
+    console.error('Logout error:', error)
+    auth0 = null
+    Streamlit.setComponentValue(null)
+    // Still reload even on error
+    setTimeout(() => {
+      if (window.parent !== window) {
+        window.parent.location.reload()
+      } else {
+        window.location.reload()
+      }
+    }, 100)
+  }
+}
+
+const login = async () => {
+  button.textContent = 'working...'
+  errorNode.textContent = ''
+  
+  try {
+    await initAuth0Client()
+    
+    await auth0.loginWithPopup()
+    
+    const user = await auth0.getUser()
+    const token = await auth0.getTokenSilently(buildTokenOptions())
+    
+    let userCopy = JSON.parse(JSON.stringify(user))
     userCopy.token = token
-    console.log(userCopy);
+    
     Streamlit.setComponentValue(userCopy)
     button.textContent = "Logout"
-    button.removeEventListener('click', login)
-    button.addEventListener('click', logout)
+    button.onclick = logout
+  } catch (err) {
+    console.error('Login error:', err)
+    if (err.message && err.message.includes('Popup')) {
+      errorNode.textContent = 'Popup blocked, please try again or enable popups'
+    } else {
+      errorNode.textContent = 'Login failed, please try again'
+    }
+    button.textContent = "Login"
+    button.onclick = login
+  }
+}
+
+// Check if user is already authenticated via localStorage (Auth0 SDK cache)
+async function checkLocalStorageAuth() {
+  console.log('Checking localStorage for cached auth...')
+  
+  try {
+    await initAuth0Client()
+    
+    // Check if there's a cached user
+    const user = await auth0.getUser()
+    
+    if (!user) {
+      console.log('No cached user found in localStorage')
+      return false
+    }
+    
+    console.log('Cached user found:', user.email || user.sub)
+    
+    // Try to get token silently (uses cached token or refresh token)
+    try {
+      const token = await auth0.getTokenSilently(buildTokenOptions())
+      
+      if (token) {
+        console.log('Got valid token from localStorage cache')
+        
+        let userCopy = JSON.parse(JSON.stringify(user))
+        userCopy.token = token
+        
+        Streamlit.setComponentValue(userCopy)
+        button.textContent = "Logout"
+        button.onclick = logout
+        
+        return true
+      }
+    } catch (tokenError) {
+      console.log('Token fetch failed:', tokenError.error || tokenError.message)
+      
+      if (tokenError.error === 'login_required' || tokenError.error === 'consent_required') {
+        // Token expired and can't be refreshed, need to login again
+        try {
+          await auth0.logout({ localOnly: true })
+        } catch (e) {}
+        return false
+      }
+      
+      // For other errors (network, etc.), still return false to show login
+      return false
+    }
+  } catch (error) {
+    console.error('Error checking localStorage auth:', error)
+    return false
+  }
+  
+  return false
 }
 
 button.onclick = login
@@ -167,67 +208,73 @@ function onRender(event) {
   scope = data.args["scope"]
   prompt = data.args["prompt"]
   
-  // Extract any additional authorization parameters
-  // Filter out the known parameters and pass through the rest
+  // Extract additional authorization parameters
   authorization_params = {}
-  const knownParams = ["client_id", "domain", "audience", "scope", "prompt"]
+  const knownParams = ["client_id", "domain", "audience", "scope", "prompt", "_cached_user"]
   for (const key in data.args) {
     if (!knownParams.includes(key)) {
       authorization_params[key] = data.args[key]
     }
   }
 
-  Streamlit.setFrameHeight()
-}
+  // If backend passed cached user (from session state), use it immediately
+  const cachedUser = data.args["_cached_user"]
+  if (cachedUser && typeof cachedUser === "object" && cachedUser.token && cachedUser.sub) {
+    console.log('Using cached user from backend session state')
+    button.textContent = "Logout"
+    button.onclick = logout
+    Streamlit.setComponentValue(cachedUser)
+    Streamlit.setFrameHeight()
+    return
+  }
 
+  // Check localStorage for cached auth (via Auth0 SDK)
+  checkLocalStorageAuth().then(authenticated => {
+    if (!authenticated) {
+      button.textContent = "Login"
+      button.onclick = login
+    }
+    Streamlit.setFrameHeight()
+  }).catch(error => {
+    console.error('Error checking auth:', error)
+    button.textContent = "Login"
+    button.onclick = login
+    Streamlit.setFrameHeight()
+  })
+}
 
 Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender)
 Streamlit.setComponentReady()
 
 const getOriginUrl = () => {
-  // For popup authentication, the redirect_uri must match what's configured in Auth0
-  // Streamlit components are served at: {origin}/component/{component_name}/index.html
-  // The component name is "auth0_component.login_button"
   const componentPath = '/component/auth0_component.login_button/index.html'
   
-  // Detect if you're inside an iframe (Streamlit component)
   if (window.parent !== window) {
     try {
-      // First, try to get the full URL from the iframe's location
       const currentIframeHref = new URL(document.location.href)
       const urlOrigin = currentIframeHref.origin
       const urlFilePath = decodeURIComponent(currentIframeHref.pathname)
       
-      // If we have a valid pathname that looks like a component path, use it
       if (urlFilePath && urlFilePath.includes('/component/')) {
         return urlOrigin + urlFilePath
       }
       
-      // Otherwise, construct it from the origin
       return urlOrigin + componentPath
     } catch (e) {
-      // If URL parsing fails, try to get parent origin
       try {
         if (window.parent.location) {
-          const parentOrigin = window.parent.location.origin
-          return parentOrigin + componentPath
+          return window.parent.location.origin + componentPath
         }
-      } catch (e2) {
-        // Cross-origin iframe - fall through to use current location
-      }
+      } catch (e2) {}
     }
   }
   
-  // Fallback: construct from current location
-  // Always use the component path to ensure it matches Auth0 configuration
   const origin = window.location.origin
   const pathname = window.location.pathname
   
-  // If pathname already contains the component path, use it
   if (pathname && pathname.includes('/component/')) {
     return origin + pathname
   }
   
-  // Otherwise, construct it
   return origin + componentPath
 }
